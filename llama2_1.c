@@ -1,25 +1,26 @@
 /*
+PLEASE WRITE DOWN NAME AND UID BELOW BEFORE SUBMISSION
+* NAME:
+* UID :
+
 Please download the model and tokenizer to the same folder:
 $ wget -O model.bin https://huggingface.co/huangs0/llama2.c/resolve/main/model.bin
 $ wget -O tokenizer.bin https://huggingface.co/huangs0/llama2.c/resolve/main/tokenizer.bin
 
-Include utilities.c in compilation:
-$ gcc -O2 -o llama2_seq llama2_seq.c utilities.c -lm
+In compile, remember to add `-pthred` to link library:
+$ gcc -o template template.c utilities.c -O2 -pthread -lm
 
 Then Run with:
-$ ./llama2_seq
+$ ./parallel
 */
 
 #define _GNU_SOURCE // keep this line
 #include <stdio.h>
 #include <stdlib.h>
-#include <time.h>
 #include <math.h>
 #include <sys/time.h>
 #include <sys/resource.h>
 #include "utilities.h"
-
-struct rusage main_usage;        // get usage for main thread
 
 /**
  * ----------------------------------------------------------------------------
@@ -29,26 +30,132 @@ struct rusage main_usage;        // get usage for main thread
  * is the most time-consuming part of GPT. Luckily, most of computation is 
  * independent of each other, so we can use parallel computing for acceleration.
  * 
- * Please use <pthread.h> and your favorate control method. You're not allowed
- * to use other libraries including OpenMP or LAPACK.
+ * Please use <pthread.h> and your favorite control method,
+ * semaphore (please #include <semaphore.h>) / mutex lock + conditional variable
  * 
  * A sequential version is provided below, please modify it to parallel version.
 */
 
-// Sequential Implementation
+// YOUR CODE STARTS HERE
+
+// additional header file
+#include <pthread.h>
+#include <semaphore.h>
+// global variables
+struct rusage main_usage;        // get usage for main thread
+struct mat_vec_mul_args{
+    float* out;
+    float* vec;
+    float* mat;
+    int col;
+    int start;
+    int end;
+    sem_t sem;
+    int terminated;
+    struct rusage thread_usage;
+};
+
+void *thr_func(void*) ;
+
+
+pthread_t* threads;
+struct mat_vec_mul_args* args;
+int thread_count = 0;
+sem_t sync;
+int init_mat_vec_mul(int thr_count) {
+    threads = malloc(thr_count * sizeof(pthread_t));
+    args = malloc(thr_count * sizeof(struct mat_vec_mul_args));
+
+    thread_count = thr_count;
+    sem_init(&sync, 0, 0);
+    for(int i=0; i<thread_count; i++){
+        sem_init(&(args[i].sem), 0, 0);
+        args[i].terminated = 0;
+        pthread_create(&threads[i], NULL, thr_func, &args[i]);
+    }
+    return 0;
+}
+
 
 void mat_vec_mul(float* out, float* vec, float* mat, int col, int row) {
-    // W (d,n) @ x (n,) -> xout (d,)
-    for (int i = 0; i < row; i++) {
-        float val = 0.0f;
-        for (int j = 0; j < col; j++) {
-            val += mat[i * col + j] * vec[j];
+    int line_for_each_thread = (row -1) / (thread_count ) + 1;
+
+    int remainder = row % thread_count;
+    for(int i = 0; i < thread_count; i++) {
+        struct mat_vec_mul_args* arg = &args[i];
+        // *arg;
+        arg->out = out;
+        arg->vec = vec;
+        arg->mat = mat;
+        arg->col = col;
+        arg->start = i * line_for_each_thread;
+        arg->end = (i + 1) * line_for_each_thread;
+        if (i == thread_count - 1) {
+            arg->end = row;
         }
-        out[i] = val;
+        sem_post(&(arg->sem));
+    }
+
+    for(int i=0;i<thread_count;i++){
+        sem_wait(&sync);
     }
 }
 
-// Don't Modify Code Below
+
+int close_mat_vec_mul() {
+
+    for (int i = 0; i < thread_count; i++) {
+        args[i].terminated = 1;
+        sem_post(&(args[i].sem));
+        sem_destroy(&(args[i].sem));
+    }
+    for(int i=0;i<thread_count;i++){
+        sem_wait(&sync);
+            printf("Thread %d has completed - user: %.4f s, system: %.4f s\n", i,
+        (args[i].thread_usage.ru_utime.tv_sec + args[i].thread_usage.ru_utime.tv_usec/1000000.0),
+        (args[i].thread_usage.ru_stime.tv_sec + args[i].thread_usage.ru_stime.tv_usec/1000000.0));
+    }
+    free(args);
+    sem_destroy(&sync);
+    free(threads);
+    getrusage(RUSAGE_SELF, &main_usage);
+    printf("main thread - user: %.4f s, system: %.4f s\n",
+    (main_usage.ru_utime.tv_sec + main_usage.ru_utime.tv_usec/1000000.0),
+    (main_usage.ru_stime.tv_sec + main_usage.ru_stime.tv_usec/1000000.0));
+    return 0;
+}
+
+
+void *thr_func(void *arg) {
+    // printf("11\n");
+    struct mat_vec_mul_args* args = (struct mat_vec_mul_args*) arg;
+    while(1){
+        sem_wait(&(args->sem));
+        if(args->terminated){
+            break;
+        }
+        int col = args->col;
+        int start = args->start;
+        int end = args->end;
+        float* out = args->out;
+        float* vec = args->vec;
+        float* mat = args->mat;
+        for (int i = start; i < end; i++) {
+            float val = 0.0f;
+            for(int j=0; j < col; j++){
+                val += vec[j] * mat[i * col + j];
+            }
+            out[i] = val;
+        }
+        sem_post(&sync);
+    }
+    getrusage(RUSAGE_THREAD, &(args->thread_usage));
+    sem_post(&sync);
+    return NULL;
+}
+
+
+// YOUR CODE ENDS HERE
 
 int transformer(int token, int pos, LLMConfig* p, LLMRuntime* s, LLMWeight* w) {
     
@@ -123,15 +230,19 @@ int transformer(int token, int pos, LLMConfig* p, LLMRuntime* s, LLMWeight* w) {
 int main(int argc, char* argv[]) {
 
     unsigned int seed;
+    int thr_count;
 
-    if (argc == 2) {
+    if (argc == 3) {
         seed = atoi(argv[1]);
+        thr_count = atoi(argv[2]);
     } else {
-        printf("Usage: ./llama2_seq <seed>\n");
+        printf("Usage: ./compiled <seed> <thr_count>\n");
         return 1;
     }
 
+    // Initialize
     srand(seed);
+    init_mat_vec_mul(thr_count);
 
     // load model
     LLMConfig config;
@@ -165,13 +276,8 @@ int main(int argc, char* argv[]) {
     long end = time_in_ms();
     printf("\n\nlength: %d, time: %f s, achieved tok/s: %f\n", config.seq_len, (double)(end-start)/1000, config.seq_len / (double)(end-start)*1000);
 
-    // print out self usage information
-    getrusage(RUSAGE_SELF, &main_usage);
-    printf("main thread - user: %.4f s, system: %.4f s\n",
-    (main_usage.ru_utime.tv_sec + main_usage.ru_utime.tv_usec/1000000.0),
-    (main_usage.ru_stime.tv_sec + main_usage.ru_stime.tv_usec/1000000.0));
-
     // cleanup
+    close_mat_vec_mul();
     free_LLMRuntime(&state);
     free_LLMWeight(&weights);
     for (int i = 0; i < config.vocab_size; i++) { free(vocab[i]); }
