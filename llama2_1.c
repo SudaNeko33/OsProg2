@@ -44,6 +44,7 @@ $ ./parallel
 // global variables
 struct rusage main_usage;        // get usage for main thread
 struct mat_vec_mul_args{
+    int no;
     float* out;
     float* vec;
     float* mat;
@@ -63,14 +64,18 @@ struct mat_vec_mul_args* args;
 int thread_count = 0;
 sem_t sync;
 int init_mat_vec_mul(int thr_count) {
+    // a
     threads = malloc(thr_count * sizeof(pthread_t));
     args = malloc(thr_count * sizeof(struct mat_vec_mul_args));
 
     thread_count = thr_count;
     sem_init(&sync, 0, 0);
+    //b
     for(int i=0; i<thread_count; i++){
         sem_init(&(args[i].sem), 0, 0);
         args[i].terminated = 0;
+        args[i].no = i;
+        // c
         pthread_create(&threads[i], NULL, thr_func, &args[i]);
     }
     return 0;
@@ -81,6 +86,7 @@ void mat_vec_mul(float* out, float* vec, float* mat, int col, int row) {
     int line_for_each_thread = (row -1) / (thread_count ) + 1;
 
     int remainder = row % thread_count;
+    // a
     for(int i = 0; i < thread_count; i++) {
         struct mat_vec_mul_args* arg = &args[i];
         // *arg;
@@ -93,9 +99,10 @@ void mat_vec_mul(float* out, float* vec, float* mat, int col, int row) {
         if (i == thread_count - 1) {
             arg->end = row;
         }
+        // b
         sem_post(&(arg->sem));
     }
-
+    // c
     for(int i=0;i<thread_count;i++){
         sem_wait(&sync);
     }
@@ -103,11 +110,11 @@ void mat_vec_mul(float* out, float* vec, float* mat, int col, int row) {
 
 
 int close_mat_vec_mul() {
-
+    // a
     for (int i = 0; i < thread_count; i++) {
         args[i].terminated = 1;
         sem_post(&(args[i].sem));
-        sem_destroy(&(args[i].sem));
+        
     }
     for(int i=0;i<thread_count;i++){
         sem_wait(&sync);
@@ -115,13 +122,20 @@ int close_mat_vec_mul() {
         (args[i].thread_usage.ru_utime.tv_sec + args[i].thread_usage.ru_utime.tv_usec/1000000.0),
         (args[i].thread_usage.ru_stime.tv_sec + args[i].thread_usage.ru_stime.tv_usec/1000000.0));
     }
-    free(args);
-    sem_destroy(&sync);
-    free(threads);
+    
+    // b
     getrusage(RUSAGE_SELF, &main_usage);
     printf("main thread - user: %.4f s, system: %.4f s\n",
     (main_usage.ru_utime.tv_sec + main_usage.ru_utime.tv_usec/1000000.0),
     (main_usage.ru_stime.tv_sec + main_usage.ru_stime.tv_usec/1000000.0));
+
+    // c
+    for(int i=0; i<thread_count;i++){
+        sem_destroy(&(args[i].sem));
+    }
+    free(args);
+    sem_destroy(&sync);
+    free(threads);
     return 0;
 }
 
@@ -130,8 +144,10 @@ void *thr_func(void *arg) {
     // printf("11\n");
     struct mat_vec_mul_args* args = (struct mat_vec_mul_args*) arg;
     while(1){
+        // a b
         sem_wait(&(args->sem));
         if(args->terminated){
+            // d
             break;
         }
         int col = args->col;
@@ -147,6 +163,7 @@ void *thr_func(void *arg) {
             }
             out[i] = val;
         }
+        // c
         sem_post(&sync);
     }
     getrusage(RUSAGE_THREAD, &(args->thread_usage));
