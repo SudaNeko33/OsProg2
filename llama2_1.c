@@ -1,7 +1,7 @@
 /*
 PLEASE WRITE DOWN NAME AND UID BELOW BEFORE SUBMISSION
-* NAME:
-* UID :
+* NAME: Xu Ziyin
+* UID : 3036173372
 
 Please download the model and tokenizer to the same folder:
 $ wget -O model.bin https://huggingface.co/huangs0/llama2.c/resolve/main/model.bin
@@ -63,10 +63,10 @@ struct mat_vec_mul_args* args;
 int thread_count = 0;
 sem_t sync;
 int init_mat_vec_mul(int thr_count) {
-    threads = malloc(thr_count * sizeof(pthread_t));
-    args = malloc(thr_count * sizeof(struct mat_vec_mul_args));
+    threads = malloc(thr_count * sizeof(pthread_t)); // create threads
+    args = malloc(thr_count * sizeof(struct mat_vec_mul_args)); // create space for args
 
-    thread_count = thr_count;
+    thread_count = thr_count; // init thread count
     sem_init(&sync, 0, 0);
     for(int i=0; i<thread_count; i++){
         sem_init(&(args[i].sem), 0, 0);
@@ -78,7 +78,7 @@ int init_mat_vec_mul(int thr_count) {
 
 
 void mat_vec_mul(float* out, float* vec, float* mat, int col, int row) {
-    int line_for_each_thread = (row -1) / (thread_count ) + 1;
+    int line_for_each_thread = (row -1) / (thread_count) + 1;
 
     int remainder = row % thread_count;
     for(int i = 0; i < thread_count; i++) {
@@ -127,7 +127,6 @@ int close_mat_vec_mul() {
 
 
 void *thr_func(void *arg) {
-    // printf("11\n");
     struct mat_vec_mul_args* args = (struct mat_vec_mul_args*) arg;
     while(1){
         sem_wait(&(args->sem));
