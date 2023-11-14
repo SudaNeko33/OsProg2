@@ -1,7 +1,7 @@
 /*
 PLEASE WRITE DOWN NAME AND UID BELOW BEFORE SUBMISSION
-* NAME: Xu Ziyin
-* UID : 3036173372
+* NAME:
+* UID :
 
 Please download the model and tokenizer to the same folder:
 $ wget -O model.bin https://huggingface.co/huangs0/llama2.c/resolve/main/model.bin
@@ -39,134 +39,28 @@ $ ./parallel
 // YOUR CODE STARTS HERE
 
 // additional header file
-#include <pthread.h>
-#include <semaphore.h>
+
 // global variables
 struct rusage main_usage;        // get usage for main thread
-struct mat_vec_mul_args{
-    int no; // thread number: to identify themselves
-    float* out;
-    float* vec;
-    float* mat;
-    int col;
-    int start;
-    int end;
-    sem_t sem;
-    int terminated;
-    struct rusage thread_usage;
-};
-
-void *thr_func(void*) ;
 
 
-pthread_t* threads;
-struct mat_vec_mul_args* args;
-int thread_count = 0;
-sem_t sync;
-int init_mat_vec_mul(int thr_count) {
-    // a. create n threads
-    threads = malloc(thr_count * sizeof(pthread_t));
-    args = malloc(thr_count * sizeof(struct mat_vec_mul_args));
-
-    thread_count = thr_count; // init thread count
-    sem_init(&sync, 0, 0);
-    for(int i=0; i<thread_count; i++){
-        sem_init(&(args[i].sem), 0, 0);
-        args[i].terminated = 0;
-        args[i].no = i; // b. to identify themselves
-        // c. fall asleep
-        pthread_create(&threads[i], NULL, thr_func, &args[i]);
-    }
-    return 0;
+int create_mat_vec_mul(int thr_count) {
+    
 }
 
 
 void mat_vec_mul(float* out, float* vec, float* mat, int col, int row) {
-    int line_for_each_thread = (row -1) / (thread_count) + 1;
-
-    int remainder = row % thread_count;
-    // a. assign parameters
-    for(int i = 0; i < thread_count; i++) {
-        struct mat_vec_mul_args* arg = &args[i];
-        // *arg;
-        arg->out = out;
-        arg->vec = vec;
-        arg->mat = mat;
-        arg->col = col;
-        arg->start = i * line_for_each_thread;
-        arg->end = (i + 1) * line_for_each_thread;
-        if (i == thread_count - 1) {
-            arg->end = row;
-        }
-        // b. wake up
-        sem_post(&(arg->sem));
-    }
-    // c. main thread fall asleep until all threads finish
-    for(int i=0;i<thread_count;i++){
-        sem_wait(&sync);
-    }
+    
 }
 
 
-int close_mat_vec_mul() {
-    // a. collect system usage and terminate 
-    for (int i = 0; i < thread_count; i++) {
-        args[i].terminated = 1;
-        sem_post(&(args[i].sem));
-    }
-    for(int i=0;i<thread_count;i++){
-        sem_wait(&sync);
-        printf("Thread %d has completed - user: %.4f s, system: %.4f s\n", i,
-        (args[i].thread_usage.ru_utime.tv_sec + args[i].thread_usage.ru_utime.tv_usec/1000000.0),
-        (args[i].thread_usage.ru_stime.tv_sec + args[i].thread_usage.ru_stime.tv_usec/1000000.0));
-    }
+int destroy_mat_vec_mul() {
     
-    // b. wait for all threads to terminate and collect usage
-    getrusage(RUSAGE_SELF, &main_usage);
-    printf("main thread - user: %.4f s, system: %.4f s\n",
-    (main_usage.ru_utime.tv_sec + main_usage.ru_utime.tv_usec/1000000.0),
-    (main_usage.ru_stime.tv_sec + main_usage.ru_stime.tv_usec/1000000.0));
-
-    // c. clear other resources
-    for(int i=0; i<thread_count;i++){
-        sem_destroy(&(args[i].sem));
-    }
-    free(args);
-    sem_destroy(&sync);
-    free(threads);
-    return 0;
 }
 
 
 void *thr_func(void *arg) {
-    struct mat_vec_mul_args* args = (struct mat_vec_mul_args*) arg;
-    while(1){
-        // a. fall asleep and b. can be woke up by main thread
-        sem_wait(&(args->sem));
-        if(args->terminated){
-            // d. terminate
-            break;
-        }
-        // calculate
-        int col = args->col;
-        int start = args->start;
-        int end = args->end;
-        float* out = args->out;
-        float* vec = args->vec;
-        float* mat = args->mat;
-        for (int i = start; i < end; i++) {
-            float val = 0.0f;
-            for(int j=0; j < col; j++){
-                val += vec[j] * mat[i * col + j];
-            }
-            out[i] = val;
-        }
-        // c. inform main thread
-        sem_post(&sync);
-    }
-    getrusage(RUSAGE_THREAD, &(args->thread_usage));
-    sem_post(&sync);
-    return NULL;
+    
 }
 
 
@@ -257,7 +151,7 @@ int main(int argc, char* argv[]) {
 
     // Initialize
     srand(seed);
-    init_mat_vec_mul(thr_count);
+    create_mat_vec_mul(thr_count);
 
     // load model
     LLMConfig config;
@@ -292,7 +186,7 @@ int main(int argc, char* argv[]) {
     printf("\n\nlength: %d, time: %f s, achieved tok/s: %f\n", config.seq_len, (double)(end-start)/1000, config.seq_len / (double)(end-start)*1000);
 
     // cleanup
-    close_mat_vec_mul();
+    destroy_mat_vec_mul();
     free_LLMRuntime(&state);
     free_LLMWeight(&weights);
     for (int i = 0; i < config.vocab_size; i++) { free(vocab[i]); }
